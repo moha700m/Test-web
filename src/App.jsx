@@ -195,7 +195,7 @@ export function App() {
                   type="url"
                   dir="ltr"
                   value={url}
-                  placeholder="https://your-project.vercel.app"
+                  placeholder="https://www.example.com"
                   onChange={(e) => {
                     setUrl(e.target.value);
                     setChallenge(null);
@@ -211,9 +211,8 @@ export function App() {
               </button>
             </form>
             <p className="platforms">
-              يدعم روابط Vercel وNetlify وCloudflare Pages وGitHub Pages
-              وReplit. استخدم رابط النشر الأصلي بدل الدومين الخاص في هذا
-              الإصدار.
+              يدعم أي دومين HTTPS عام تملكه، بما فيه الدومينات الخاصة وروابط
+              Vercel وNetlify وCloudflare Pages وGitHub Pages وReplit.
             </p>
             <div className="plans" role="radiogroup" aria-label="نوع الاختبار">
               {plans.map(([id, label, seconds, rps]) => (
@@ -430,7 +429,7 @@ export function App() {
               [
                 "link",
                 "حط الرابط",
-                "ابدأ برابط موقعك المنشور على منصة مدعومة.",
+                "ابدأ برابط موقعك المنشور على الإنترنت، سواء دومين خاص أو رابط منصة استضافة.",
               ],
               [
                 "shield-halved",

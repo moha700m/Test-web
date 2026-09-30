@@ -1,11 +1,3 @@
-const SUFFIXES = [
-  "vercel.app",
-  "netlify.app",
-  "pages.dev",
-  "github.io",
-  "replit.app",
-  "chatgpt.site",
-];
 export const PLANS = {
   quick: { duration: 10, rps: 1 },
   light: { duration: 20, rps: 2 },
@@ -43,29 +35,23 @@ export function safeTarget(raw) {
     throw new Problem(
       "استخدم رابط HTTPS مباشر بدون بيانات دخول أو منفذ أو معاملات إضافية.",
     );
-  if (
-    !SUFFIXES.some(
-      (s) =>
-        h.endsWith("." + s) &&
-        h
-          .slice(0, -s.length - 1)
-          .split(".")
-          .every((x) => /^[a-z0-9][a-z0-9-]*$/.test(x)),
-    )
-  )
-    throw new Problem(
-      "هذا الدومين غير مدعوم الآن. استخدم رابط المشروع على Vercel أو Netlify أو Pages أو GitHub Pages أو Replit.",
-    );
+  const labels = h.split(".");
   if (
     h.length > 253 ||
     /^\d+(\.\d+){3}$/.test(h) ||
     h.includes(":") ||
     !h.includes(".") ||
     h === "localhost" ||
+    h.endsWith(".localhost") ||
     h.endsWith(".local") ||
-    h.endsWith(".internal")
+    h.endsWith(".internal") ||
+    h.endsWith(".lan") ||
+    h.endsWith(".home") ||
+    !labels.every((label) =>
+      /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label),
+    )
   )
-    throw new Problem("الرابط غير مسموح.");
+    throw new Problem("استخدم دومين HTTPS عام صالح ومتاح على الإنترنت.");
   return u;
 }
 export function storeFor(db) {

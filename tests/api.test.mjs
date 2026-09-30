@@ -80,24 +80,31 @@ async function fixture(t, { status = 200, delay = 0 } = {}) {
     },
   };
 }
-test("rejects private endpoints, credentials, suffix confusion, ports and redirects destinations", () => {
+test("accepts public custom domains and rejects private or malformed targets", () => {
   for (const url of [
     "http://foo.vercel.app",
     "https://127.0.0.1",
     "https://127.1",
     "https://[::1]",
-    "https://x.vercel.app.evil.com",
     "https://u:p@x.vercel.app",
     "https://x.vercel.app:444",
     "https://x.vercel.app/?key=a",
     "https://x.vercel.app/#a",
     "https://localhost",
     "https://x.vercel.app./",
+    "https://-bad.example.com",
+    "https://bad-.example.com",
+    "https://bad_name.example.com",
+    "https://example..com/",
   ])
     assert.throws(() => safeTarget(url), url);
   assert.equal(
     safeTarget("https://hello.vercel.app/a").origin,
     "https://hello.vercel.app",
+  );
+  assert.equal(
+    safeTarget("https://www.linkarabs.com/").origin,
+    "https://www.linkarabs.com",
   );
 });
 test("requires ownership and keeps public proof bound to a private browser session", async (t) => {
