@@ -113,12 +113,6 @@ export async function handleApi(request, env = {}, context = {}, deps = {}) {
         cid = id(),
         token = "site-check-" + id();
       await store.run("DELETE FROM challenges WHERE expires < ?", now);
-      const total = await store.get(
-        "SELECT COUNT(*) AS n FROM challenges WHERE session = ?",
-        session,
-      );
-      if (total.n >= 8)
-        throw new Problem("وصلت الحد المؤقت للتحقق. حاول بعد 30 دقيقة.", 429);
       await store.run(
         "INSERT INTO challenges (id,session,origin,url,token,expires) VALUES (?,?,?,?,?,?)",
         cid,

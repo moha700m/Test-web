@@ -214,8 +214,7 @@ export function App() {
               </button>
             </form>
             <p className="platforms">
-              يدعم أي دومين HTTPS عام تملكه، بما فيه الدومينات الخاصة وروابط
-              Vercel وNetlify وCloudflare Pages وGitHub Pages وReplit.
+              يدعم أي دومين HTTPS عام تملكه، وعدد مرات الاختبار غير محدود. كل تشغيل يبقى ضمن حدود حمل آمنة.
             </p>
             <div className="plans" role="radiogroup" aria-label="نوع الاختبار">
               {plans.map(([id, label, seconds, rps]) => (
@@ -489,7 +488,7 @@ export function App() {
                 "حتى 3 طلبات/ثانية، باتصال واحد",
                 "حتى 20 ثانية و60 طلب للاختبار",
                 "إيقاف تلقائي عند 429 أو 503 أو 3 أخطاء متتالية",
-                "دقيقة انتظار بين اختبارات نفس الموقع",
+                "عدد مرات الاختبار غير محدود، مع دقيقة انتظار بين اختبارات نفس الموقع",
               ].map((t) => (
                 <li key={t}>
                   <Icon name="check" /> {t}
