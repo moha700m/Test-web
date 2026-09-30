@@ -15,6 +15,14 @@ async function fixture(t, { status = 200, delay = 0 } = {}) {
       res.end(token);
       return;
     }
+    if (
+      req.url === "/" &&
+      req.headers["user-agent"]?.includes("(ownership verification)")
+    ) {
+      res.setHeader("Content-Type", "text/html");
+      res.end(`<html><head><meta name="site-check" content="${token}"></head><body>fixture</body></html>`);
+      return;
+    }
     starts.push(Date.now());
     network++;
     setTimeout(

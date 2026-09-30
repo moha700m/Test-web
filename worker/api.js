@@ -172,6 +172,52 @@ export async function handleApi(request, env = {}, context = {}, deps = {}) {
       const controller = new AbortController(),
         timer = setTimeout(() => controller.abort(), 4000);
       try {
+        // Modern default: prove control by publishing a meta tag on the public homepage.
+        // The legacy .well-known text file remains supported as a fallback.
+        try {
+          const page = await fetcher(c.origin + "/", {
+            redirect: "manual",
+            signal: controller.signal,
+            headers: {
+              "User-Agent": "WebsiteCheck/1.0 (ownership verification)",
+              Accept: "text/html",
+            },
+          });
+          if (page.status === 200) {
+            const declared = Number(page.headers.get("content-length") || 0);
+            if (!declared || declared <= 262144) {
+              let html = "", bytes = 0;
+              const reader = page.body?.getReader();
+              if (reader) {
+                while (true) {
+                  const { value, done } = await reader.read();
+                  if (done) break;
+                  bytes += value.length;
+                  if (bytes > 262144) {
+                    await reader.cancel();
+                    html = "";
+                    break;
+                  }
+                  html += new TextDecoder().decode(value, { stream: true });
+                }
+              }
+              const escaped = c.token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+              const meta = new RegExp(
+                `<meta\\b(?=[^>]*\\bname\\s*=\\s*["']site-check["'])(?=[^>]*\\bcontent\\s*=\\s*["']${escaped}["'])[^>]*>`,
+                "i",
+              );
+              if (meta.test(html)) return;
+            } else {
+              await page.body?.cancel();
+            }
+          } else {
+            await page.body?.cancel();
+          }
+        } catch (e) {
+          if (e?.name === "AbortError") throw e;
+          // Fall through to the legacy file method.
+        }
+
         const r = await fetcher(c.origin + "/.well-known/site-check.txt", {
           redirect: "manual",
           signal: controller.signal,
@@ -183,7 +229,7 @@ export async function handleApi(request, env = {}, context = {}, deps = {}) {
         if (r.status !== 200) {
           await r.body?.cancel();
           throw new Problem(
-            "ملف التحقق ما يظهر مباشرة. انشره وتأكد أنه يرجع HTTP 200 بدون تحويل.",
+            "ما لقينا رمز التحقق. أضف Meta Tag في <head> أو استخدم ملف التحقق الاحتياطي.",
           );
         }
         if (Number(r.headers.get("content-length") || 0) > 1024) {
@@ -207,12 +253,12 @@ export async function handleApi(request, env = {}, context = {}, deps = {}) {
         }
         if (text.trim() !== c.token)
           throw new Problem(
-            "نص ملف التحقق مو مطابق. انسخ البرومبت الحالي وانشر التعديل.",
+            "رمز التحقق غير مطابق. انسخ البرومبت الحالي وانشر التعديل ثم حاول مرة ثانية.",
           );
       } catch (e) {
         if (e instanceof Problem) throw e;
         throw new Problem(
-          "تعذّر الوصول لملف التحقق خلال 4 ثوانٍ. تأكد أن الموقع منشور ومتاح.",
+          "تعذّر التحقق خلال 4 ثوانٍ. تأكد أن الموقع منشور وأن Meta Tag ظاهر في كود الصفحة.",
         );
       } finally {
         clearTimeout(timer);

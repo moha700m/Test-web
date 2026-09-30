@@ -32,8 +32,11 @@ export function App() {
     [job, setJob] = useState(null),
     [menu, setMenu] = useState(false);
   const chosen = plans.find((p) => p[0] === plan),
+    metaTag = challenge
+      ? `<meta name="site-check" content="${challenge.token}">`
+      : "",
     prompt = challenge
-      ? `أضف ملف نصي عام إلى مشروعي بالمسار public/.well-known/site-check.txt يحتوي فقط على النص التالي:\n${challenge.token}\nلا تغيّر وظائف المشروع. انشر التعديل، وتأكد أن ${challenge.proofUrl} يعرض النص مباشرة برمز HTTP 200، بدون تسجيل دخول أو تحويل.`
+      ? `أضف Meta Tag التالي داخل <head> في الصفحة الرئيسية لموقعي، بدون تغيير أي وظيفة أو تصميم:\n${metaTag}\nانشر التعديل بعد إضافته وتأكد أن الـ Meta Tag موجود في HTML المنشور.`
       : "";
   async function perform(action, fn) {
     setBusy(action);
@@ -54,7 +57,7 @@ export function App() {
       setVerified(false);
       setResult(null);
       setSamples([]);
-      setMessage("أضف ملف التحقق لموقعك، ثم اضغط «تحقق من الملكية».");
+      setMessage("أضف Meta Tag للموقع، انشر التعديل، ثم اضغط «تحقق الآن».");
     });
   const verify = () =>
     perform("verify", async () => {
@@ -65,7 +68,7 @@ export function App() {
   async function copy() {
     try {
       await navigator.clipboard.writeText(prompt);
-      setMessage("تم نسخ البرومبت. أرسله لأداة بناء موقعك.");
+      setMessage("تم نسخ البرومبت. أرسله لأداة بناء موقعك ثم انشر التعديل.");
     } catch {
       setMessage("حدد نص البرومبت وانسخه يدويًا.");
     }
@@ -242,33 +245,50 @@ export function App() {
                 {!verified && (
                   <>
                     <p>
-                      أرسل البرومبت لأداة الفايب كودنق، وانشر التعديل على موقعك.
+                      الأسرع الآن: أرسل البرومبت لأداة بناء موقعك. تضيف سطرًا واحدًا داخل <code>&lt;head&gt;</code> وتنشره.
                     </p>
-                    <textarea
-                      aria-label="برومبت ملف التحقق"
-                      readOnly
-                      value={prompt}
-                    />
+                    <div
+                      dir="ltr"
+                      style={{
+                        padding: "14px 16px",
+                        border: "1px solid #353d4f",
+                        borderRadius: 5,
+                        background: "#080e1b",
+                        color: "#dfe3ec",
+                        overflowX: "auto",
+                        fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                        fontSize: 13,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {metaTag}
+                    </div>
                     <div className="actions">
                       <button className="secondary" onClick={copy}>
-                        <Icon name="copy" /> انسخ البرومبت
+                        <Icon name="copy" /> نسخ لأداة البناء
                       </button>
                       <button
                         className="primary"
                         onClick={verify}
                         disabled={!!busy}
                       >
-                        {busy === "verify" ? "جاري التحقق…" : "تحقق من الملكية"}
+                        {busy === "verify" ? "جاري التحقق…" : "تحقق الآن"}
                       </button>
                     </div>
-                    <a
-                      className="proof"
-                      href={challenge.proofUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      افتح ملف التحقق <Icon name="up-right-from-square" />
-                    </a>
+                    <details style={{ marginTop: 14, color: "#8d94a3", fontSize: 13 }}>
+                      <summary style={{ cursor: "pointer" }}>طريقة بديلة للمشاريع القديمة</summary>
+                      <p style={{ marginTop: 10 }}>
+                        ما زال بإمكانك استخدام ملف <code dir="ltr">/.well-known/site-check.txt</code> بنفس رمز التحقق.
+                      </p>
+                      <a
+                        className="proof"
+                        href={challenge.proofUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        افتح رابط الملف الاحتياطي <Icon name="up-right-from-square" />
+                      </a>
+                    </details>
                   </>
                 )}
                 {verified && busy !== "run" && (
@@ -434,7 +454,7 @@ export function App() {
               [
                 "shield-halved",
                 "أثبت الملكية",
-                "انسخ البرومبت لأداة البناء وانشر ملف التحقق.",
+                "انسخ البرومبت لأداة البناء؛ تضيف Meta Tag واحدًا ثم تنشر التعديل.",
               ],
               [
                 "chart-line",
