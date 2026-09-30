@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.sites-runtime/
+*.sqlite*
+.env
+qa/
+
+.vercel/
