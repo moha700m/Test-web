@@ -84,10 +84,21 @@ jobs:
               1,
           )
           app.write_text(text)
+
+          tests = Path('tests/api.test.mjs')
+          text = tests.read_text()
+          fixture = '''    if (req.url === "/.well-known/site-check.txt") {\n      res.end(token);\n      return;\n    }\n    starts.push(Date.now());'''
+          fixture_new = '''    if (req.url === "/.well-known/site-check.txt") {\n      res.end(token);\n      return;\n    }\n    if (\n      req.url === "/" &&\n      req.headers["user-agent"]?.includes("(ownership verification)")\n    ) {\n      res.setHeader("Content-Type", "text/html");\n      res.end(`<html><head><meta name="site-check" content="${token}"></head><body>fixture</body></html>`);\n      return;\n    }\n    starts.push(Date.now());'''
+          if fixture not in text:
+              raise SystemExit('test fixture block not found')
+          tests.write_text(text.replace(fixture, fixture_new, 1))
           PY
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Build
+        run: npm run build
 
       - name: Test
         run: npm test
@@ -95,9 +106,9 @@ jobs:
       - name: Commit verified change
         shell: bash
         run: |
-          rm .github/workflows/modernize-verification.yml
+          rm -f .github/workflows/modernize-verification.yml .verification-trigger
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add worker/api.js src/App.jsx .github/workflows/modernize-verification.yml
+          git add worker/api.js src/App.jsx tests/api.test.mjs .github/workflows/modernize-verification.yml .verification-trigger
           git commit -m "feat: modernize ownership verification"
           git push origin HEAD:main
