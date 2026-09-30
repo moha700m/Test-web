@@ -153,10 +153,21 @@ test("makes 10 genuine HTTP requests within the fixed quick budget, without forw
   assert.ok(
     f.calls.every((h) => h["user-agent"].startsWith("WebsiteCheck/1.0")),
   );
-  assert.equal(
-    (await f.request("run", { id: c.id, plan: "quick" })).status,
-    403,
-  );
+  const again = await f.request("run", { id: c.id, plan: "quick" });
+  assert.equal(again.status, 200);
+  await again.body.cancel();
+});
+test("ramp resilience mode is bounded and stops immediately on rate limiting", async (t) => {
+  const f = await fixture(t, { status: 429 }),
+    c = await f.setup(),
+    r = await f.request("run", { id: c.id, plan: "ramp" }),
+    events = (await r.text()).trim().split("\n").map(JSON.parse),
+    report = events.at(-1).result;
+  assert.equal(f.count, 1);
+  assert.equal(report.maxRps, 10);
+  assert.equal(report.maxRequests, 155);
+  assert.equal(report.samples[0].targetRps, 1);
+  assert.equal(report.degradationRps, 1);
 });
 test("automatically stops on 429 after a single real request", async (t) => {
   const f = await fixture(t, { status: 429 }),

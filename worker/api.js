@@ -2,6 +2,12 @@ export const PLANS = {
   quick: { duration: 10, rps: 1 },
   light: { duration: 20, rps: 2 },
   standard: { duration: 20, rps: 3 },
+  ramp: {
+    duration: 30,
+    rps: 10,
+    ramp: [1, 2, 4, 6, 8, 10],
+    stageSeconds: 5,
+  },
 };
 const id = () => crypto.randomUUID(),
   json = (data, status = 200, headers = {}) =>
@@ -259,8 +265,6 @@ export async function handleApi(request, env = {}, context = {}, deps = {}) {
       }
     }
     if (path === "/api/verify") {
-      if (c.used)
-        throw new Problem("هذا التحقق استُخدم. جهّز اختبارًا جديدًا.");
       const changed = await store.run(
         "UPDATE challenges SET attempts = attempts + 1 WHERE id = ? AND attempts < 3",
         c.id,
@@ -268,47 +272,43 @@ export async function handleApi(request, env = {}, context = {}, deps = {}) {
       if (!changed)
         throw new Problem("وصلت 3 محاولات. جهّز التحقق من جديد.", 429);
       await prove();
+      const verifiedAt = Date.now();
+      await store.run(
+        "UPDATE challenges SET verified = ?, expires = ? WHERE id = ?",
+        verifiedAt,
+        verifiedAt + 86400000,
+        c.id,
+      );
+      return reply({ ok: true, verifiedUntil: verifiedAt + 86400000 });
+    }
+    if (Number(c.verified) <= 0)
+      throw new Problem("تحقق من ملكية الموقع قبل تشغيل الاختبار.", 403);
+    if (!Object.hasOwn(PLANS, body.plan))
+      throw new Problem("نوع الاختبار غير صالح.");
+    const plan = PLANS[body.plan];
+    if (Date.now() - Number(c.verified) > 60000) {
+      await prove();
       await store.run(
         "UPDATE challenges SET verified = ? WHERE id = ?",
         Date.now(),
         c.id,
       );
-      return reply({ ok: true });
     }
-    if (Number(c.verified) <= 0 || c.used)
-      throw new Problem("تحقق من ملكية الموقع قبل تشغيل الاختبار.", 403);
-    if (!Object.hasOwn(PLANS, body.plan))
-      throw new Problem("نوع الاختبار غير صالح.");
-    const plan = PLANS[body.plan];
-    if (Date.now() - c.verified > 10000) await prove();
     const runId = id(),
       now = Date.now(),
       lock = await store.run(
-        "UPDATE hosts SET locked_until = ?, last_started = ?, run_id = ? WHERE origin = ? AND locked_until < ? AND last_started < ?",
-        now + 60000,
+        "UPDATE hosts SET locked_until = ?, last_started = ?, run_id = ? WHERE origin = ? AND locked_until < ?",
+        now + 45000,
         now,
         runId,
         c.origin,
         now,
-        now - 60000,
       );
     if (!lock)
       throw new Problem(
-        "الموقع عليه اختبار الآن أو انتهى توه. انتظر دقيقة.",
+        "يوجد اختبار شغال على هذا الموقع الآن. انتظر لينتهي ثم أعد التشغيل.",
         429,
       );
-    const used = await store.run(
-      "UPDATE challenges SET used = 1 WHERE id = ? AND used = 0",
-      c.id,
-    );
-    if (!used) {
-      await store.run(
-        "UPDATE hosts SET locked_until = 0 WHERE origin = ? AND run_id = ?",
-        c.origin,
-        runId,
-      );
-      throw new Problem("تم استخدام هذا التحقق مسبقًا.", 403);
-    }
     await store.run(
       "INSERT INTO runs (id,session,origin,started) VALUES (?,?,?,?)",
       runId,
@@ -332,16 +332,28 @@ export async function handleApi(request, env = {}, context = {}, deps = {}) {
     const task = (async () => {
       const samples = [];
       let consecutive = 0,
-        reason = "اكتملت مدة الاختبار.";
+        reason = "اكتملت مدة الاختبار.",
+        forcedDegradationRps = null;
       const start = Date.now(),
-        deadline = start + plan.duration * 1000;
+        deadline = start + plan.duration * 1000,
+        maxRequests = plan.ramp
+          ? plan.ramp.reduce((sum, rate) => sum + rate * plan.stageSeconds, 0)
+          : plan.duration * plan.rps;
+      const percentile95 = (values) => {
+        if (!values.length) return null;
+        const sorted = [...values].sort((a, b) => a - b);
+        return sorted[Math.max(0, Math.ceil(sorted.length * 0.95) - 1)];
+      };
       try {
-        await emit({ type: "start", id: runId });
-        for (
-          let i = 0;
-          i < plan.duration * plan.rps && Date.now() < deadline;
-          i++
-        ) {
+        await emit({
+          type: "start",
+          id: runId,
+          mode: plan.ramp ? "ramp" : "fixed",
+          maxRequests,
+          maxRps: plan.rps,
+        });
+        let sent = 0;
+        while (sent < maxRequests && Date.now() < deadline) {
           if (disconnected || request.signal.aborted) {
             reason = "تم إيقاف الاختبار بعد انقطاع الاتصال.";
             break;
@@ -354,8 +366,18 @@ export async function handleApi(request, env = {}, context = {}, deps = {}) {
             reason = "تم إيقاف الاختبار بطلبك.";
             break;
           }
-          const requestStart = Date.now(),
+
+          const elapsed = Date.now() - start,
+            stage = plan.ramp
+              ? Math.min(
+                  plan.ramp.length - 1,
+                  Math.floor(elapsed / (plan.stageSeconds * 1000)),
+                )
+              : 0,
+            targetRps = plan.ramp ? plan.ramp[stage] : plan.rps,
+            requestStart = Date.now(),
             began = performance.now();
+
           currentController = new AbortController();
           const timeout = setTimeout(
             () => currentController.abort(),
@@ -369,14 +391,14 @@ export async function handleApi(request, env = {}, context = {}, deps = {}) {
                 signal: currentController.signal,
                 headers: {
                   "User-Agent":
-                    "WebsiteCheck/1.0 (verified bounded performance test)",
+                    "WebsiteCheck/1.0 (verified resilience test)",
                   Accept: "text/html",
                 },
               }),
-              elapsed = performance.now() - began;
+              elapsedMs = performance.now() - began;
             await r.body?.cancel();
             sample = {
-              ms: Math.round(elapsed * 100) / 100,
+              ms: Math.round(elapsedMs * 100) / 100,
               status: r.status,
               ok: r.status >= 200 && r.status < 300,
               error:
@@ -385,6 +407,8 @@ export async function handleApi(request, env = {}, context = {}, deps = {}) {
                   : r.status >= 400
                     ? "HTTP " + r.status
                     : "",
+              targetRps,
+              stage,
             };
           } catch {
             sample = {
@@ -392,31 +416,97 @@ export async function handleApi(request, env = {}, context = {}, deps = {}) {
               status: 0,
               ok: false,
               error: "مهلة أو اتصال",
+              targetRps,
+              stage,
             };
           } finally {
             clearTimeout(timeout);
           }
+
           samples.push(sample);
+          sent++;
           await emit({ type: "sample", sample });
           consecutive = sample.ok ? 0 : consecutive + 1;
+
           if (sample.status === 429 || sample.status === 503) {
-            reason = "توقف تلقائيًا: الموقع طلب تقليل الحمل أو رجع 503.";
+            forcedDegradationRps = targetRps;
+            reason =
+              "توقف تلقائيًا: الموقع طلب تقليل الحمل أو رجع 503 عند " +
+              targetRps +
+              " طلب/ثانية.";
             break;
           }
           if (consecutive >= 3) {
-            reason = "توقف تلقائيًا بعد 3 أخطاء متتالية.";
+            forcedDegradationRps = targetRps;
+            reason =
+              "توقف تلقائيًا بعد 3 أخطاء متتالية عند " +
+              targetRps +
+              " طلب/ثانية.";
             break;
           }
+
+          if (plan.ramp) {
+            const window = samples
+                .filter((s) => s.targetRps === targetRps)
+                .slice(-10),
+              failures = window.filter((s) => !s.ok).length,
+              successMs = window.filter((s) => s.ok).map((s) => s.ms),
+              windowP95 = percentile95(successMs),
+              enough = window.length >= Math.min(5, targetRps * 2);
+            if (
+              enough &&
+              (failures / window.length >= 0.2 ||
+                (windowP95 != null && windowP95 > 2500))
+            ) {
+              forcedDegradationRps = targetRps;
+              reason =
+                "توقف تلقائيًا عند بداية التدهور: أخطاء 20%+ أو p95 أعلى من 2500ms عند " +
+                targetRps +
+                " طلب/ثانية.";
+              break;
+            }
+          }
+
           const wait = Math.min(
-            Math.max(0, requestStart + 1000 / plan.rps - Date.now()),
+            Math.max(0, requestStart + 1000 / targetRps - Date.now()),
             Math.max(0, deadline - Date.now()),
           );
           if (wait) await new Promise((r) => setTimeout(r, wait));
         }
+
         const good = samples
             .filter((s) => s.ok)
             .map((s) => s.ms)
             .sort((a, b) => a - b),
+          rates = [...new Set(samples.map((s) => s.targetRps))].sort(
+            (a, b) => a - b,
+          ),
+          stages = rates.map((targetRps) => {
+            const rows = samples.filter((s) => s.targetRps === targetRps),
+              ok = rows.filter((s) => s.ok),
+              p95 = percentile95(ok.map((s) => s.ms));
+            return {
+              targetRps,
+              count: rows.length,
+              failures: rows.length - ok.length,
+              successRate: rows.length ? ok.length / rows.length : 0,
+              p95,
+            };
+          }),
+          stableStages = stages.filter(
+            (s) =>
+              s.count >= 2 &&
+              s.successRate >= 0.9 &&
+              (s.p95 == null || s.p95 <= 2500),
+          ),
+          stableRps = stableStages.length
+            ? stableStages[stableStages.length - 1].targetRps
+            : 0,
+          degradationStage = stages.find(
+            (s) => s.successRate < 0.8 || (s.p95 != null && s.p95 > 2500),
+          ),
+          degradationRps =
+            forcedDegradationRps ?? degradationStage?.targetRps ?? null,
           result = {
             id: runId,
             url: c.url,
@@ -433,9 +523,13 @@ export async function handleApi(request, env = {}, context = {}, deps = {}) {
               : null,
             reason,
             samples,
+            stages,
+            stableRps,
+            degradationRps,
             measurement: "response_headers_latency",
             concurrency: 1,
-            maxRequests: plan.duration * plan.rps,
+            maxRequests,
+            maxRps: plan.rps,
           };
         await store.run(
           "UPDATE runs SET finished = 1, result = ? WHERE id = ?",
@@ -447,7 +541,8 @@ export async function handleApi(request, env = {}, context = {}, deps = {}) {
         console.error("run failed", runId, e.message);
         await emit({
           type: "error",
-          error: "تعذّر إكمال الاختبار. تقدر تعيد المحاولة بعد دقيقة.",
+          error:
+            "تعذّر إكمال الاختبار. تقدر تعيد المحاولة بعد انتهاء التشغيل الحالي.",
         });
       } finally {
         await store.run(

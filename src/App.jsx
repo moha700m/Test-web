@@ -4,6 +4,7 @@ const plans = [
   ["quick", "فحص سريع", 10, 1],
   ["light", "حمل خفيف", 20, 2],
   ["standard", "حمل محدود", 20, 3],
+  ["ramp", "تحمل متدرج", 30, 10, "30 ثانية · 1→10 طلب/ثانية"],
 ];
 const Icon = ({ name }) => (
   <i className={`fa-solid fa-${name}`} aria-hidden="true" />
@@ -102,7 +103,6 @@ export function App() {
             if (e.type === "sample") setSamples((s) => [...s, e.sample]);
             if (e.type === "done") {
               setResult(e.result);
-              setVerified(false);
               setMessage(e.result.reason);
             }
             if (e.type === "error") throw new Error(e.error);
@@ -133,7 +133,9 @@ export function App() {
     setTimeout(() => URL.revokeObjectURL(href), 1000);
   }
   const good = samples.filter((s) => s.ok),
-    avg = good.length ? good.reduce((a, s) => a + s.ms, 0) / good.length : null;
+    avg = good.length ? good.reduce((a, s) => a + s.ms, 0) / good.length : null,
+    expectedRequests = chosen[0] === "ramp" ? 155 : chosen[2] * chosen[3],
+    currentRps = samples.at(-1)?.targetRps || chosen[3];
   return (
     <>
       <header>
@@ -217,7 +219,7 @@ export function App() {
               يدعم أي دومين HTTPS عام تملكه، وعدد مرات الاختبار غير محدود. كل تشغيل يبقى ضمن حدود حمل آمنة.
             </p>
             <div className="plans" role="radiogroup" aria-label="نوع الاختبار">
-              {plans.map(([id, label, seconds, rps]) => (
+              {plans.map(([id, label, seconds, rps, note]) => (
                 <button
                   key={id}
                   className={"plan " + (plan === id ? "selected" : "")}
@@ -228,7 +230,7 @@ export function App() {
                 >
                   <strong>{label}</strong>
                   <span>
-                    {seconds} ثانية · {rps} طلب/ثانية
+                    {note || `${seconds} ثانية · ${rps} طلب/ثانية`}
                   </span>
                 </button>
               ))}
@@ -238,7 +240,7 @@ export function App() {
                 <h3>
                   <Icon name={verified ? "circle-check" : "shield-halved"} />{" "}
                   {verified
-                    ? "ملكية الموقع مؤكدة"
+                    ? "ملكية الموقع مؤكدة · اختبارات غير محدودة"
                     : "خطوة واحدة لإثبات الملكية"}
                 </h3>
                 {!verified && (
@@ -325,10 +327,10 @@ export function App() {
                   max="100"
                   value={Math.min(
                     99,
-                    (samples.length / (chosen[2] * chosen[3])) * 100,
+                    (samples.length / expectedRequests) * 100,
                   )}
                 />
-                <p>{samples.length} طلب تم قياسه · اتصال واحد</p>
+                <p>{samples.length} طلب تم قياسه · الهدف الحالي {currentRps} طلب/ثانية · اتصال واحد</p>
               </div>
             )}
           </section>
@@ -402,9 +404,18 @@ export function App() {
                   </h3>
                   <p>
                     {result.reason}{" "}
-                    {result.failures === 0
-                      ? "كرر الفحص بعد التعديلات الكبيرة."
-                      : "شيّك سجلات الموقع وحدود الاستضافة وإعدادات الرابط."}
+                    {result.plan === "ramp" && (
+                      <>
+                        أعلى معدل مستقر تقريبي: <strong>{result.stableRps || "—"}</strong> طلب/ثانية.
+                        {result.degradationRps
+                          ? ` بداية التدهور ظهرت قرب ${result.degradationRps} طلب/ثانية.`
+                          : " ما ظهرت نقطة تدهور ضمن النطاق المختبر."}
+                      </>
+                    )}
+                    {result.plan !== "ramp" &&
+                      (result.failures === 0
+                        ? "كرر الفحص بعد التعديلات الكبيرة."
+                        : "شيّك سجلات الموقع وحدود الاستضافة وإعدادات الرابط.")}
                   </p>
                 </div>
               </div>
@@ -458,7 +469,7 @@ export function App() {
               [
                 "chart-line",
                 "خذ النتيجة",
-                "شغل الاختبار، راجع النتائج أو حمّل التقرير.",
+                "اختر فحصًا ثابتًا أو تحملًا متدرجًا، راقب نقطة التدهور، ثم حمّل التقرير.",
               ],
             ].map(([icon, title, text], i) => (
               <article key={title}>
@@ -484,11 +495,11 @@ export function App() {
             </div>
             <ul>
               {[
-                "HTTPS وموقع تثبت ملكيته",
-                "حتى 3 طلبات/ثانية، باتصال واحد",
-                "حتى 20 ثانية و60 طلب للاختبار",
-                "إيقاف تلقائي عند 429 أو 503 أو 3 أخطاء متتالية",
-                "عدد مرات الاختبار غير محدود، مع دقيقة انتظار بين اختبارات نفس الموقع",
+                "HTTPS وموقع تثبت ملكيته قبل أي اختبار حمل",
+                "فحوص ثابتة + تحمل متدرج من 1 إلى 10 طلبات/ثانية",
+                "حتى 30 ثانية و155 طلبًا في وضع التحمل المتدرج",
+                "إيقاف تلقائي عند 429 أو 503 أو 3 أخطاء متتالية أو تدهور واضح",
+                "بعد إثبات الملكية: عدد مرات التشغيل غير محدود، مع منع تشغيل اختبارين متزامنين لنفس الموقع",
               ].map((t) => (
                 <li key={t}>
                   <Icon name="check" /> {t}
